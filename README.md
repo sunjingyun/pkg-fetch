@@ -19,27 +19,3 @@ A utility to fetch or build patched Node binaries used by [pkg](https://github.c
 <em id="fn2">[2]</em>: best-effort basis, not semver-protected.
 
 <em id="fn3">[3]</em>: [mandatory code signing](https://developer.apple.com/documentation/macos-release-notes/macos-big-sur-11_0_1-universal-apps-release-notes) is enforced by Apple.
-
-## Security
-
-We do not expect this project to have vulnerabilities of its own. Nonetheless, as this project distributes prebuilt Node.js binaries,
-
-**Node.js security vulnerabilities affect binaries distributed by this project, as well.**
-
-Like most of you, this project does not have access to advance/private disclosures of Node.js security vulnerabilities. We can only closely monitor the **public** security advisories from the Node.js team. It takes time to build and release a new set of binaries, once a new Node.js version has been released.
-
-**It is possible for this project to fall victim to a supply chain attack.**
-
-This project deploys multiple defense measures to ensure that the safe binaries are delivered to users:
-
-- Binaries are compiled by [Github Actions](https://github.com/yao-pkg/pkg-fetch/actions)
-  - Workflows and build logs are transparent and auditable.
-  - Artifacts are the source of truth. Even repository/organization administrators can't tamper them.
-- Hashes of binaries are hardcoded in [source](https://github.com/yao-pkg/pkg-fetch/blob/HEAD/lib/expected.ts)
-  - Origins of the binaries are documented.
-  - Changes to the binaries are logged by VCS (Git) and are publicly visible.
-  - `pkg-fetch` rejects the binary if it does not match the hardcoded hash.
-- GPG-signed hashes are available in [Releases](https://github.com/yao-pkg/pkg-fetch/releases)
-  - Easy to spot a compromise.
-- `pkg-fetch` package on npm is strictly permission-controlled
-  - Only authorized Vercel employees can push new revisions to npm.
