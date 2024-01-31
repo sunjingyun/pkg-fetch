@@ -1,12 +1,12 @@
 {
-  "name": "@yao-pkg/pkg-fetch",
+  "name": "@sunjingyun/pkg-fetch",
   "version": "3.5.7",
   "description": "Compiles and stores base binaries for pkg",
   "main": "lib-es5/index.js",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yao-pkg/pkg-fetch.git"
+    "url": "git+https://github.com/sunjingyun/pkg-fetch.git"
   },
   "bin": {
     "pkg-fetch": "lib-es5/bin.js"
