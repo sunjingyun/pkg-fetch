@@ -88,7 +88,11 @@ async function tarFetch(nodeVersion: string) {
   const archivePath = path.join(nodeArchivePath, tarName);
   const hashPath = path.join(nodeArchivePath, `${tarName}.sha256sum`);
 
+  log.info(`Ready to download ${hashPath} to ${distUrl}/SHASUMS256.txt`);
+  log.info(`Ready to download ${archivePath} to ${distUrl}/${tarName}`);
+
   if (fs.existsSync(hashPath) && fs.existsSync(archivePath)) {
+    log.info('Canceling download, use cache');
     return;
   }
 
