@@ -8,7 +8,7 @@ import { promisify } from 'util';
 import tar from 'tar-fs';
 
 import { cachePath } from './places';
-import { downloadUrl, hash, spawn } from './utils';
+import { easyDownloadUrl, hash, spawn } from './utils';
 import { hostArch, hostPlatform } from './system';
 import { log, wasReported } from './log';
 import patchesJson from '../patches/patches.json';
@@ -85,8 +85,8 @@ async function tarFetch(nodeVersion: string) {
   const distUrl = `${nodeRepo}/${nodeVersion}`;
   const tarName = `node-${nodeVersion}.tar.gz`;
 
-  const archivePath = path.join(nodeArchivePath, tarName);
   const hashPath = path.join(nodeArchivePath, `${tarName}.sha256sum`);
+  const archivePath = path.join(nodeArchivePath, tarName);
 
   log.info(`Ready to download ${hashPath} to ${distUrl}/SHASUMS256.txt`);
   log.info(`Ready to download ${archivePath} to ${distUrl}/${tarName}`);
@@ -99,7 +99,7 @@ async function tarFetch(nodeVersion: string) {
   await fs.remove(hashPath).catch(() => undefined);
   await fs.remove(archivePath).catch(() => undefined);
 
-  await downloadUrl(`${distUrl}/SHASUMS256.txt`, hashPath);
+  await easyDownloadUrl(`${distUrl}/SHASUMS256.txt`, hashPath);
 
   await fs.writeFile(
     hashPath,
@@ -108,7 +108,7 @@ async function tarFetch(nodeVersion: string) {
       .filter((l) => l.includes(tarName))[0]
   );
 
-  await downloadUrl(`${distUrl}/${tarName}`, archivePath);
+  await easyDownloadUrl(`${distUrl}/${tarName}`, archivePath);
 }
 
 async function tarExtract(nodeVersion: string, suppressTarOutput: boolean) {

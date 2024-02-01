@@ -60,6 +60,41 @@ export async function downloadUrl(url: string, file: string): Promise<void> {
   });
 }
 
+export async function easyDownloadUrl(url: string, file: string): Promise<void> {
+  const proxy =
+    process.env.HTTPS_PROXY ??
+    process.env.https_proxy ??
+    process.env.HTTP_PROXY ??
+    process.env.http_proxy;
+
+  const res = await fetch(
+    url,
+    proxy ? { agent: httpsProxyAgent(proxy) } : undefined
+  );
+
+  if (!res.ok) {
+    throw wasReported(`${res.status}: ${res.statusText}`);
+  }
+
+  const tempFile = `${file}.downloading`;
+  fs.mkdirpSync(path.dirname(tempFile));
+  const ws = fs.createWriteStream(tempFile);
+
+  res.body.pipe(ws);
+
+  return new Promise<void>((resolve, reject) => {
+    stream.finished(ws, (err) => {
+      if (err) {
+        fs.rmSync(tempFile);
+        reject(wasReported(`${err.name}: ${err.message}`));
+      } else {
+        fs.moveSync(tempFile, file);
+        resolve();
+      }
+    });
+  });
+}
+
 export async function hash(filePath: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const resultHash = crypto.createHash('sha256');
