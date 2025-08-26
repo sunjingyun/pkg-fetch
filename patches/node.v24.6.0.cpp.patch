@@ -29,34 +29,45 @@ diff --git node/deps/v8/src/api/api.cc node/deps/v8/src/api/api.cc
 index 8d224bea2e..8402afc0fb 100644
 --- node/deps/v8/src/api/api.cc
 +++ node/deps/v8/src/api/api.cc
-@@ -443,7 +443,33 @@
+@@ -443,7 +443,40 @@
                                         HelpOptions(HelpOptions::kDontExit));
  }
  
-+bool save_lazy;
-+bool save_predictable;
++namespace v8 { namespace internal { namespace pkg {
++
++bool save_lazy = false;
++bool save_predictable = false;
++
++void SetScriptSource(Isolate* isolate, Handle<Script> script,
++                    Tagged<Union<String, Undefined>> value) {
++  script->set_source(value, WriteBarrierMode::UPDATE_WRITE_BARRIER);
++}
++
++}}}  // namespace v8::internal::pkg
 +
 +void V8::EnableCompilationForSourcelessUse() {
-+  save_lazy = i::v8_flags.lazy;
-+  i::v8_flags.lazy = false;
-+  save_predictable = i::v8_flags.predictable;
-+  i::v8_flags.predictable = true;
++  using namespace v8::internal::pkg;
++  save_lazy = internal::v8_flags.lazy;
++  internal::v8_flags.lazy = false;
++  save_predictable = internal::v8_flags.predictable;
++  internal::v8_flags.predictable = true;
 +}
 +
 +void V8::DisableCompilationForSourcelessUse() {
-+  i::v8_flags.lazy = save_lazy;
-+  i::v8_flags.predictable = save_predictable;
++  using namespace v8::internal::pkg;
++  internal::v8_flags.lazy = save_lazy;
++  internal::v8_flags.predictable = save_predictable;
 +}
 +
 +void V8::FixSourcelessScript(Isolate* v8_isolate, Local<UnboundScript> unbound_script) {
-+  auto isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
-+  i::Handle<i::SharedFunctionInfo> function_info = Utils::OpenHandle(*unbound_script);
-+  i::Tagged<i::HeapObject> script_tagged = function_info->script();
-+  i::Handle<i::Script> script_handle(
-+      i::Script::cast(script_tagged),
-+      isolate
-+  );
-+  script_handle->set_source(i::ReadOnlyRoots(isolate).undefined_value(), i::WriteBarrierMode::UPDATE_WRITE_BARRIER);
++  auto* isolate = reinterpret_cast<internal::Isolate*>(v8_isolate);
++  internal::Handle<internal::SharedFunctionInfo> function_info =
++      Utils::OpenHandle(*unbound_script);
++  internal::Tagged<internal::HeapObject> script_tagged = function_info->script();
++  internal::Handle<internal::Script> script_handle(
++      internal::Cast<internal::Script>(script_tagged), isolate);
++  v8::internal::pkg::SetScriptSource(isolate, script_handle,
++                                    internal::ReadOnlyRoots(isolate).undefined_value());
 +}
 +
  RegisteredExtension* RegisteredExtension::first_extension_ = nullptr;
