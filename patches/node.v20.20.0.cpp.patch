@@ -181,7 +181,7 @@ new file mode 100644
 index 0000000000..a697294fdf
 --- /dev/null
 +++ node/lib/internal/bootstrap/pkg.js
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,53 @@
 +'use strict';
 +
 +const {
@@ -204,6 +204,10 @@ index 0000000000..a697294fdf
 +    var PAYLOAD_SIZE = '// PAYLOAD_SIZE //' | 0;
 +    var PRELUDE_POSITION = '// PRELUDE_POSITION //' | 0;
 +    var PRELUDE_SIZE = '// PRELUDE_SIZE //' | 0;
++    // Remove PKG_DUMMY_ENTRYPOINT if present
++    if (process.argv[1] === 'PKG_DUMMY_ENTRYPOINT') {
++      process.argv.splice(1, 1);
++    }
 +    if (!PRELUDE_POSITION) {
 +      // no prelude - remove entrypoint from argv[1]
 +      process.argv.splice(1, 1);
@@ -230,7 +234,7 @@ index 0000000000..a697294fdf
 +      fs.closeSync(fd);
 +    }
 +  }());
-+}());
++}())
  diff --git node/lib/internal/modules/cjs/loader.js node/lib/internal/modules/cjs/loader.js
 index b077ee386b..b4271b5951 100644
 --- node/lib/internal/modules/cjs/loader.js
