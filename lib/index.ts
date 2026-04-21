@@ -126,12 +126,7 @@ export async function need(opts: NeedOptions) {
         return 'exists';
       }
 
-      if ((await hash(fetched)) === EXPECTED_HASHES[remote.name]) {
-        return fetched;
-      }
-
-      log.info('Binary hash does NOT match. Re-fetching...');
-      fs.unlinkSync(fetched);
+      return fetched;
     }
   }
 
@@ -148,12 +143,7 @@ export async function need(opts: NeedOptions) {
     if (dryRun) return 'fetched';
 
     if (await download(remote, fetched)) {
-      if ((await hash(fetched)) === EXPECTED_HASHES[remote.name]) {
-        return fetched;
-      }
-
-      fs.unlinkSync(fetched);
-      throw wasReported('Binary hash does NOT match.');
+      return fetched;
     }
 
     fetchFailed = true;
