@@ -550,3 +550,38 @@ index 2655b9e694..1d951571c7 100644
              'cflags_cc!': [ '-fno-rtti' ],
            }],
            [ 'OS == "mac" or OS == "ios"', {
+diff --git node/lib/internal/modules/esm/resolve.js node/lib/internal/modules/esm/resolve.js
+index 8a1b2c3d4e..9f8e7d6c5b 100644
+--- node/lib/internal/modules/esm/resolve.js
++++ node/lib/internal/modules/esm/resolve.js
+@@ -39,7 +39,7 @@ 
+ const { URL, pathToFileURL, fileURLToPath, isURL } = require('internal/url');
+ const { getCWDURL, setOwnProperty } = require('internal/util');
+ const { canParse: URLCanParse } = internalBinding('url');
+-const { legacyMainResolve: FSLegacyMainResolve } = internalBinding('fs');
++const FSLegacyMainResolve = require('fs').legacyMainResolve;
+ const {
+   ERR_INPUT_TYPE_NOT_ALLOWED,
+   ERR_INVALID_ARG_TYPE,
+@@ -59,7 +59,7 @@ 
+ const { getPackageScopeConfig } = require('internal/modules/esm/package_config');
+ const { getConditionsSet } = require('internal/modules/esm/utils');
+ const packageJsonReader = require('internal/modules/package_json_reader');
+-const { internalModuleStat } = internalBinding('fs');
++const internalModuleStat = function (f) { return require('fs').internalModuleStat(f); }
+ 
+ /**
+  * @typedef {import('internal/modules/esm/package_config.js').PackageConfig} PackageConfig
+diff --git node/lib/internal/modules/esm/formats.js node/lib/internal/modules/esm/formats.js
+index abcdef1234..9876543210 100644
+--- node/lib/internal/modules/esm/formats.js
++++ node/lib/internal/modules/esm/formats.js
+@@ -4,7 +4,7 @@ 
+ const { getOptionValue } = require('internal/options');
+ const { getValidatedPath } = require('internal/fs/utils');
+ const pathModule = require('path');
+-const fsBindings = internalBinding('fs');
++const fsBindings = require('fs');
+ const { fs: fsConstants } = internalBinding('constants');
+ 
+ const experimentalWasmModules = getOptionValue('--experimental-wasm-modules');
