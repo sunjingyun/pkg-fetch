@@ -57,6 +57,12 @@ const script = `
   } else
   if (modules === 115) {
     // no cpu features anymore
+  } else
+  if (modules === 127) {
+    // no cpu features anymore
+  } else
+  if (modules === 137) {
+    // no cpu features anymore
   } else {
     assert(false, modules);
   }
@@ -96,6 +102,10 @@ const script = `
   if (modules === 111) {
   } else
   if (modules === 115) {
+  } else
+  if (modules === 127) {
+  } else
+  if (modules === 137) {
   } else {
     assert(false, modules);
   }

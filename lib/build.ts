@@ -324,7 +324,7 @@ export default async function build(
   local: string
 ) {
   await prepBuildPath();
-  await fetchExtractApply(nodeVersion, false);
+  await fetchExtractApply(nodeVersion, true);
 
   const output = await compile(nodeVersion, targetArch, targetPlatform);
   const outputHash = await hash(output);
