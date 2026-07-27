@@ -1,10 +1,11 @@
-import fetch from 'node-fetch';
+import { fetch, ProxyAgent } from 'undici';
 import crypto from 'crypto';
-import fs from 'fs-extra';
-import httpsProxyAgent from 'https-proxy-agent';
+import { createReadStream, createWriteStream, mkdirSync, renameSync, rmSync } from 'fs';
+import { chmod, stat } from 'fs/promises';
 import path from 'path';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { spawnSync, SpawnSyncOptions } from 'child_process';
-import stream from 'stream';
 
 import { coerce } from 'semver';
 import { log, wasReported } from './log';
@@ -19,86 +20,72 @@ export async function downloadUrl(url: string, file: string): Promise<void> {
     process.env.HTTP_PROXY ??
     process.env.http_proxy;
 
-  const res = await fetch(
-    url,
-    proxy ? { agent: httpsProxyAgent(proxy) } : undefined
-  );
+  // Created once and closed in `finally` so its connection pool never leaks,
+  // even across the multiple throw paths below.
+  const dispatcher = proxy ? new ProxyAgent(proxy) : undefined;
 
-  if (!res.ok) {
-    log.disableProgress();
-    throw wasReported(`${res.status}: ${res.statusText}`);
-  }
-
-  const tempFile = `${file}.downloading`;
-  fs.mkdirpSync(path.dirname(tempFile));
-  const ws = fs.createWriteStream(tempFile);
-
-  const totalSize = Number(res.headers.get('content-length'));
-  let currentSize = 0;
-
-  res.body.on('data', (chunk: Buffer) => {
-    if (totalSize != null && totalSize !== 0) {
-      currentSize += chunk.length;
-      log.showProgress((currentSize / totalSize) * 100);
+  try {
+    let res;
+    try {
+      res = await fetch(url, dispatcher ? { dispatcher } : undefined);
+    } catch (err) {
+      log.disableProgress();
+      throw wasReported(
+        `Network error during fetch: ${(err as Error).message}`
+      );
     }
-  });
-  res.body.pipe(ws);
 
-  return new Promise<void>((resolve, reject) => {
-    stream.finished(ws, (err) => {
-      if (err) {
-        log.disableProgress();
-        fs.rmSync(tempFile);
-        reject(wasReported(`${err.name}: ${err.message}`));
-      } else {
-        log.showProgress(100);
-        log.disableProgress();
-        fs.moveSync(tempFile, file);
-        resolve();
+    if (!res.ok) {
+      log.disableProgress();
+      throw wasReported(`${res.status}: ${res.statusText}`);
+    }
+
+    if (!res.body) {
+      log.disableProgress();
+      throw wasReported(`Empty response body for ${url}`);
+    }
+
+    const tempFile = `${file}.downloading`;
+    mkdirSync(path.dirname(tempFile), { recursive: true });
+    const ws = createWriteStream(tempFile);
+
+    const totalSize = Number(res.headers.get('content-length'));
+    let currentSize = 0;
+
+    const body = Readable.fromWeb(res.body);
+    body.on('data', (chunk: Buffer) => {
+      // Falsy for both a missing header (`NaN`) and a zero length, avoiding a
+      // `NaN%` progress reading.
+      if (totalSize) {
+        currentSize += chunk.length;
+        log.showProgress((currentSize / totalSize) * 100);
       }
     });
-  });
-}
 
-export async function easyDownloadUrl(url: string, file: string): Promise<void> {
-  const proxy =
-    process.env.HTTPS_PROXY ??
-    process.env.https_proxy ??
-    process.env.HTTP_PROXY ??
-    process.env.http_proxy;
+    // `pipeline` propagates errors from the source (`body`) as well as the
+    // destination (`ws`), so a truncated/aborted download rejects loudly
+    // instead of leaving the promise unsettled and the process exiting
+    // silently.
+    try {
+      await pipeline(body, ws);
+    } catch (err) {
+      log.disableProgress();
+      rmSync(tempFile, { force: true });
+      throw wasReported(`${(err as Error).name}: ${(err as Error).message}`);
+    }
 
-  const res = await fetch(
-    url,
-    proxy ? { agent: httpsProxyAgent(proxy) } : undefined
-  );
-
-  if (!res.ok) {
-    throw wasReported(`${res.status}: ${res.statusText}`);
+    log.showProgress(100);
+    log.disableProgress();
+    renameSync(tempFile, file);
+  } finally {
+    await dispatcher?.close();
   }
-
-  const tempFile = `${file}.downloading`;
-  fs.mkdirpSync(path.dirname(tempFile));
-  const ws = fs.createWriteStream(tempFile);
-
-  res.body.pipe(ws);
-
-  return new Promise<void>((resolve, reject) => {
-    stream.finished(ws, (err) => {
-      if (err) {
-        fs.rmSync(tempFile);
-        reject(wasReported(`${err.name}: ${err.message}`));
-      } else {
-        fs.moveSync(tempFile, file);
-        resolve();
-      }
-    });
-  });
 }
 
 export async function hash(filePath: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const resultHash = crypto.createHash('sha256');
-    const input = fs.createReadStream(filePath);
+    const input = createReadStream(filePath);
 
     input.on('error', (e) => {
       reject(e);
@@ -116,11 +103,11 @@ export async function hash(filePath: string): Promise<string> {
 }
 
 export async function plusx(file: string) {
-  const s = await fs.stat(file);
+  const s = await stat(file);
   const newMode = s.mode | 64 | 8 | 1;
   if (s.mode === newMode) return;
   const base8 = newMode.toString(8).slice(-3);
-  await fs.chmod(file, base8);
+  await chmod(file, base8);
 }
 
 export async function spawn(

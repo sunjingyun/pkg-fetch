@@ -1,6 +1,7 @@
 import { createGunzip } from 'zlib';
 import crypto from 'crypto';
-import fs from 'fs-extra';
+import { createReadStream, existsSync } from 'fs';
+import { cp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { pipeline } from 'stream';
@@ -8,7 +9,7 @@ import { promisify } from 'util';
 import tar from 'tar-fs';
 
 import { cachePath } from './places';
-import { easyDownloadUrl, hash, spawn } from './utils';
+import { downloadUrl, hash, spawn } from './utils';
 import { hostArch, hostPlatform } from './system';
 import { log, wasReported } from './log';
 import patchesJson from '../patches/patches.json';
@@ -28,7 +29,7 @@ function getMajor(nodeVersion: string) {
   return Number(version) | 0;
 }
 
-function getConfigureArgs(major: number, targetPlatform: string): string[] {
+function getConfigureArgs(major: number, targetPlatform: string, targetArch: string): string[] {
   const args: string[] = [];
 
   // first of all v8_inspector introduces the use
@@ -49,8 +50,11 @@ function getConfigureArgs(major: number, targetPlatform: string): string[] {
   }
 
   // Link Time Optimization
+  // Skipped on macOS: LTO makes the link phase enormously slow and pushes the
+  // build past GitHub Actions' 6h job limit (worst on the Intel x64 runner).
+  // See yao-pkg/pkg-fetch#170.
   if (major >= 12) {
-    if (hostPlatform !== 'win') {
+    if (hostPlatform !== 'win' && targetPlatform !== 'macos') {
       args.push('--enable-lto');
     }
   }
@@ -68,12 +72,20 @@ function getConfigureArgs(major: number, targetPlatform: string): string[] {
   args.push('--without-npm');
 
   // Small ICU
-  args.push('--with-intl=small-icu');
+  if (hostPlatform !== 'win' || major < 24) {
+    args.push('--with-intl=small-icu');
+  }
 
   // Workaround for nodejs/node#39313
   // All supported macOS versions have zlib as a system library
   if (targetPlatform === 'macos') {
     args.push('--shared-zlib');
+  }
+  
+  // macos cross-build from arm64 to x64
+  if (targetPlatform === 'macos' && hostArch === 'arm64' && targetArch === 'x64') {
+    args.push('--dest-os=mac');
+    args.push('--dest-cpu=x64');
   }
 
   return args;
@@ -85,30 +97,28 @@ async function tarFetch(nodeVersion: string) {
   const distUrl = `${nodeRepo}/${nodeVersion}`;
   const tarName = `node-${nodeVersion}.tar.gz`;
 
-  const hashPath = path.join(nodeArchivePath, `${tarName}.sha256sum`);
   const archivePath = path.join(nodeArchivePath, tarName);
+  const hashPath = path.join(nodeArchivePath, `${tarName}.sha256sum`);
 
-  log.info(`Ready to download ${hashPath} to ${distUrl}/SHASUMS256.txt`);
-  log.info(`Ready to download ${archivePath} to ${distUrl}/${tarName}`);
-
-  if (fs.existsSync(hashPath) && fs.existsSync(archivePath)) {
-    log.info('Canceling download, use cache');
+  if (existsSync(hashPath) && existsSync(archivePath)) {
     return;
   }
 
-  await fs.remove(hashPath).catch(() => undefined);
-  await fs.remove(archivePath).catch(() => undefined);
+  await rm(hashPath, { recursive: true, force: true }).catch(() => undefined);
+  await rm(archivePath, { recursive: true, force: true }).catch(
+    () => undefined
+  );
 
-  await easyDownloadUrl(`${distUrl}/SHASUMS256.txt`, hashPath);
+  await downloadUrl(`${distUrl}/SHASUMS256.txt`, hashPath);
 
-  await fs.writeFile(
+  await writeFile(
     hashPath,
-    (await fs.readFile(hashPath, 'utf8'))
+    (await readFile(hashPath, 'utf8'))
       .split('\n')
       .filter((l) => l.includes(tarName))[0]
   );
 
-  await easyDownloadUrl(`${distUrl}/${tarName}`, archivePath);
+  await downloadUrl(`${distUrl}/${tarName}`, archivePath);
 }
 
 async function tarExtract(nodeVersion: string, suppressTarOutput: boolean) {
@@ -117,28 +127,32 @@ async function tarExtract(nodeVersion: string, suppressTarOutput: boolean) {
   const tarName = `node-${nodeVersion}.tar.gz`;
 
   const expectedHash = (
-    await fs.readFile(
-      path.join(nodeArchivePath, `${tarName}.sha256sum`),
-      'utf8'
-    )
+    await readFile(path.join(nodeArchivePath, `${tarName}.sha256sum`), 'utf8')
   ).split(' ')[0];
   const actualHash = await hash(path.join(nodeArchivePath, tarName));
 
   if (expectedHash !== actualHash) {
-    await fs.remove(path.join(nodeArchivePath, tarName));
-    await fs.remove(path.join(nodeArchivePath, `${tarName}.sha256sum`));
+    await rm(path.join(nodeArchivePath, tarName), {
+      recursive: true,
+      force: true,
+    });
+    await rm(path.join(nodeArchivePath, `${tarName}.sha256sum`), {
+      recursive: true,
+      force: true,
+    });
     throw wasReported(`Hash mismatch for ${tarName}`);
   }
 
   const pipe = promisify(pipeline);
 
-  const source = fs.createReadStream(path.join(nodeArchivePath, tarName));
+  const source = createReadStream(path.join(nodeArchivePath, tarName));
   const gunzip = createGunzip();
   const extract = tar.extract(nodePath, {
     strip: 1,
     map: (header) => {
       if (!suppressTarOutput) {
-        log.info(header.name);
+        // disabled for now - can't get cmdline flag to work with all builds
+        // log.info(header.name);
       }
       return header;
     },
@@ -168,7 +182,10 @@ async function applyPatches(nodeVersion: string) {
   }
 }
 
-export async function fetchExtractApply(nodeVersion: string, quietExtraction: boolean) {
+export async function fetchExtractApply(
+  nodeVersion: string,
+  quietExtraction: boolean
+) {
   await tarFetch(nodeVersion);
   await tarExtract(nodeVersion, quietExtraction);
   await applyPatches(nodeVersion);
@@ -181,7 +198,7 @@ async function compileOnWindows(
 ) {
   const args = ['/c', 'vcbuild.bat', targetArch];
   const major = getMajor(nodeVersion);
-  const config_flags = getConfigureArgs(major, targetPlatform);
+  const config_flags = getConfigureArgs(major, targetPlatform, targetArch);
 
   // The dtrace and etw support was removed in https://github.com/nodejs/node/commit/aa3a572e6bee116cde69508dc29478b40f40551a
   if (major <= 18) {
@@ -199,12 +216,11 @@ async function compileOnWindows(
     args.push('ltcg');
   }
 
-  // Can't cross compile for arm64 with small-icu
-  if (
-    hostArch !== targetArch &&
-    !config_flags.includes('--with-intl=full-icu')
-  ) {
-    config_flags.push('--without-intl');
+  // Node24 builds on Windows crash with small-icu at icudat codegen
+  // workaround for now is to enable full-icu
+  // TODO check with newer node/tooling/gh-image versions
+  if (major >= 24) {
+    args.push('full-icu');
   }
 
   await spawn('cmd', args, {
@@ -244,11 +260,18 @@ async function compileOnUnix(
 
   if (targetArch === 'armv7') {
     const { CFLAGS = '', CXXFLAGS = '' } = process.env;
-    process.env.CFLAGS = `${CFLAGS} -marm -mcpu=cortex-a7`;
-    process.env.CXXFLAGS = `${CXXFLAGS} -marm -mcpu=cortex-a7`;
+    process.env.CFLAGS = `${CFLAGS} -marm -mcpu=cortex-a7 -mfpu=vfpv3`;
+    process.env.CXXFLAGS = `${CXXFLAGS} -marm -mcpu=cortex-a7 -mfpu=vfpv3`;
 
     args.push('--with-arm-float-abi=hard');
     args.push('--with-arm-fpu=vfpv3');
+  }
+  // macos cross-build from arm64 to x64
+  if (targetPlatform === "macos" && hostArch === 'arm64' && targetArch === 'x64') {
+    const { CFLAGS = '', CXXFLAGS = '', LDFLAGS='' } = process.env;
+    process.env.CFLAGS = `${CFLAGS} -arch x86_64`;
+    process.env.CXXFLAGS = `${CXXFLAGS} -arch x86_64`;
+    process.env.LDFLAGS = `${LDFLAGS} -arch x86_64`;
   }
 
   if (hostArch !== targetArch) {
@@ -257,8 +280,9 @@ async function compileOnUnix(
     args.push('--cross-compiling');
   }
 
-  args.push(...getConfigureArgs(getMajor(nodeVersion), targetPlatform));
+  args.push(...getConfigureArgs(getMajor(nodeVersion), targetPlatform, targetArch));
 
+  log.info("Running configure with: ", args.join(" "));
   // TODO same for windows?
   await spawn('/bin/sh', ['./configure', ...args], {
     cwd: nodePath,
@@ -312,9 +336,9 @@ async function compile(
 }
 
 export async function prepBuildPath() {
-  await fs.remove(buildPath);
-  await fs.mkdirp(nodePath);
-  await fs.mkdirp(nodeArchivePath);
+  await rm(buildPath, { recursive: true, force: true });
+  await mkdir(nodePath, { recursive: true });
+  await mkdir(nodeArchivePath, { recursive: true });
 }
 
 export default async function build(
@@ -324,17 +348,17 @@ export default async function build(
   local: string
 ) {
   await prepBuildPath();
-  await fetchExtractApply(nodeVersion, true);
+  await fetchExtractApply(nodeVersion, false);
 
   const output = await compile(nodeVersion, targetArch, targetPlatform);
   const outputHash = await hash(output);
 
-  await fs.mkdirp(path.dirname(local));
-  await fs.copy(output, local);
-  await fs.promises.writeFile(
+  await mkdir(path.dirname(local), { recursive: true });
+  await cp(output, local);
+  await writeFile(
     `${local}.sha256sum`,
     `${outputHash}  ${path.basename(local)}
 `
   );
-  await fs.remove(buildPath);
+  await rm(buildPath, { recursive: true, force: true });
 }
