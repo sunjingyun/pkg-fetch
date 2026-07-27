@@ -20,20 +20,28 @@ import { downloadUrl, hash, plusx } from './utils';
 import patchesJson from '../patches/patches.json';
 import { version } from '../package.json';
 
+const REMOTE_MIRRORS = [
+  'https://github.com/sunjingyun/pkg-fetch/releases/download',
+];
+
 async function download(
   { tag, name }: Remote,
   local: string
 ): Promise<boolean> {
-  const url = `https://github.com/sunjingyun/pkg-fetch/releases/download/${tag}/${name}`;
+  for (const base of REMOTE_MIRRORS) {
+    const url = `${base}/${tag}/${name}`;
+    log.info('Fetching base binary from:', url);
 
-  try {
-    await downloadUrl(url, local);
-    await plusx(local);
-  } catch {
-    return false;
+    try {
+      await downloadUrl(url, local);
+      await plusx(local);
+      return true;
+    } catch {
+      log.info('Fetch failed:', url);
+    }
   }
 
-  return true;
+  return false;
 }
 
 async function exists(file: string) {
@@ -118,6 +126,7 @@ export async function need(opts: NeedOptions) {
 
   let fetchFailed;
 
+  // Prefer prebuilt (fetched) over locally compiled (built).
   if (!forceBuild) {
     if (await exists(fetched)) {
       if (dryRun) {
@@ -129,28 +138,19 @@ export async function need(opts: NeedOptions) {
         !!process.env.PKG_NODE_PATH ||
         (await hash(fetched)) === EXPECTED_HASHES[remote.name]
       ) {
+        log.info('Using prebuilt base binary:', fetched);
         return fetched;
       }
 
       log.info('Binary hash does NOT match. Re-fetching...');
       unlinkSync(fetched);
     }
-  }
 
-  if (!forceFetch) {
-    if (await exists(built)) {
-      if (dryRun) return 'exists';
-      if (forceBuild) log.info('Reusing base binaries built locally:', built);
-
-      return built;
-    }
-  }
-
-  if (!forceBuild) {
     if (dryRun) return 'fetched';
 
     if (await download(remote, fetched)) {
       if ((await hash(fetched)) === EXPECTED_HASHES[remote.name]) {
+        log.info('Using downloaded prebuilt base binary:', fetched);
         return fetched;
       }
 
@@ -159,6 +159,16 @@ export async function need(opts: NeedOptions) {
     }
 
     fetchFailed = true;
+  }
+
+  if (!forceFetch) {
+    if (await exists(built)) {
+      if (dryRun) return 'exists';
+      if (forceBuild) log.info('Reusing base binaries built locally:', built);
+      else log.info('Falling back to locally built base binary:', built);
+
+      return built;
+    }
   }
 
   if (!dryRun && fetchFailed) {
